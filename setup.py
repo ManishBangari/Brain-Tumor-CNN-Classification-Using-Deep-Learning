@@ -9,7 +9,7 @@ __version__ = "0.0.1"
 REPO_NAME = "Brain-Tumor-CNN-Classification-Using-Deep-Learning"
 AUTHOR_USER_NAME = "ManishBangari"
 SRC_REPO = "BrainTumorCNNClassifier"
-AUTHOR_EMAIL = "hellonouniverse@gmail.com"
+AUTHOR_EMAIL = "manishbangari2108@gmail.com"
 
 
 setuptools.setup(
