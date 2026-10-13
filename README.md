@@ -32,3 +32,20 @@ The dataset used in this project consists of brain MRI images that are publicly 
 - scipy
 - Flask
 - seaborn
+
+## Quick Start
+
+This project expects the Kaggle dataset to be present locally under `data/Training` and `data/Testing`.
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements.txt
+python main.py train --epochs 1 --output-dir artifacts/run-001 --train-dir data/Training --test-dir data/Testing
+python main.py evaluate --model-path artifacts/run-001/checkpoints/best_model.keras --train-dir data/Training --test-dir data/Testing
+python main.py predict --image data/Testing/glioma/Te-gl_114.jpg --model-path artifacts/run-001/checkpoints/best_model.keras --train-dir data/Training
+```
+
+The training command uses the `Training` split for model fitting and validation, and the `Testing` split is reserved for final evaluation. Checkpoints and class mapping are saved under the selected output directory.
+
+Training refuses to overwrite an existing checkpoint. Use a new output directory for each training run.
