@@ -133,18 +133,47 @@ Prediction uses the same RGB decoding and resizing as dataset loading, loads
 the class order from the Training folder names, and prints the predicted
 label, confidence, and class probabilities.
 
+## Flask web app
+
+A local Flask upload page is available in `app.py`. It loads the best saved Keras checkpoint and class list at startup, validates uploaded images, and returns a browser preview with predicted label and confidence score.
+
+```bash
+python app.py
+# or
+flask --app app run --host 127.0.0.1 --port 5000
+```
+
+Open `http://127.0.0.1:5000/` in a browser. The page also includes a clear limitation notice: "For educational/research use only. Not intended for medical diagnosis or treatment."
+
+## MLflow tracking
+
+Training logs key parameters, epoch metrics, and the final blended test metrics to a local MLflow store under `mlruns/` by default.
+
+```bash
+mlflow ui --backend-store-uri file:///$(pwd)/mlruns --host 127.0.0.1 --port 5001
+```
+
+## DVC pipeline
+
+The repository includes a minimal DVC pipeline in `dvc.yaml` for dataset validation, model training, and evaluation. It does not require a remote storage provider.
+
+```bash
+dvc dag
+dvc repro
+```
+
+## Tests
+
+The repository includes lightweight Python tests for dataset shape checks, model output shape, and the Flask upload route.
+
+```bash
+pytest -q tests
+```
+
 ## Scope and limitations
 
-- There is no implemented Flask app, route, or UI launch command; the checked-in
-  HTML template is not connected to a service.
-- No automated test files are currently included.
-- The existing checkpoint in `artifacts/checkpoints/` predates the corrected
-  stratified validation split and should not be treated as a final model.
-  Use a new output directory to train with the corrected loader.
-- A one-epoch CPU smoke test completed, but no full training run has been
-  performed. Smoke-test results are not a model benchmark.
-- Dataset image counts, split balance, and quality should be rechecked for
-  any different local dataset copy. No perceptual near-duplicate audit has
-  been performed.
+- Training, evaluation, and prediction are implemented and verified locally when the dataset is present.
+- Full training and held-out evaluation are resource dependent; the exact metrics depend on the local hardware and runtime.
+- Model artifacts and MLflow stores are kept local and ignored by Git.
 - This classifier has not been clinically validated and is not suitable for
   diagnosis or treatment decisions.

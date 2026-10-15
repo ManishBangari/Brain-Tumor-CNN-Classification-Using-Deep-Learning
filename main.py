@@ -78,7 +78,7 @@ def run_evaluation(args: argparse.Namespace):
     model_path = Path(args.model_path)
     if not model_path.exists():
         raise FileNotFoundError(f"Model not found at {model_path}")
-    from src.BrainTumorCNNClassifier.pipeline.brain_tumor_pipeline import build_datasets, load_model
+    from src.BrainTumorCNNClassifier.pipeline.brain_tumor_pipeline import build_datasets, compute_classification_metrics, load_model
 
     _, _, test_ds, _ = build_datasets(
         train_dir=args.train_dir or config.paths.train_dir,
@@ -91,11 +91,14 @@ def run_evaluation(args: argparse.Namespace):
     )
     model = load_model(model_path)
     test_loss, test_accuracy, test_precision, test_recall = model.evaluate(test_ds, verbose=0)
+    classification_report = compute_classification_metrics(model, test_ds, class_names)
     metrics = {
         "test_loss": float(test_loss),
         "test_accuracy": float(test_accuracy),
         "test_precision": float(test_precision),
         "test_recall": float(test_recall),
+        "per_class": classification_report["per_class"],
+        "confusion_matrix": classification_report["confusion_matrix"],
     }
     print(json.dumps(metrics, indent=2))
 

@@ -178,6 +178,7 @@ wandb/
 .dvc/cache/
 
 PROMPT.md
+PROMPT-2.md
 
 # Local secrets and environment overrides
 .env.*

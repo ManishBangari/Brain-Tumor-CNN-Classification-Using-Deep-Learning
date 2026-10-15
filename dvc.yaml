@@ -1,0 +1,46 @@
+stages:
+  validate_data:
+    cmd: python -m src.BrainTumorCNNClassifier.data_validation
+    deps:
+      - data/Training
+      - data/Testing
+      - src/BrainTumorCNNClassifier/data_validation.py
+    params:
+      - params.yaml:
+          - train_dir
+          - test_dir
+    outs:
+      - data/validation_report.json
+
+  train_model:
+    cmd: python main.py train --output-dir artifacts/run-dvc --epochs 3
+    deps:
+      - data/Training
+      - data/Testing
+      - main.py
+      - config/config.yaml
+      - src/BrainTumorCNNClassifier/pipeline/brain_tumor_pipeline.py
+    params:
+      - params.yaml:
+          - train_dir
+          - test_dir
+          - epochs
+          - batch_size
+          - image_size
+          - learning_rate
+          - validation_split
+          - seed
+    outs:
+      - artifacts/run-dvc/checkpoints/best_model.keras
+      - artifacts/run-dvc/class_names.json
+      - artifacts/run-dvc/metrics.json
+      - artifacts/run-dvc/test_metrics.json
+
+  evaluate_model:
+    cmd: python main.py evaluate --model-path artifacts/run-dvc/checkpoints/best_model.keras --train-dir data/Training --test-dir data/Testing
+    deps:
+      - artifacts/run-dvc/checkpoints/best_model.keras
+      - data/Testing
+      - main.py
+    metrics:
+      - artifacts/run-dvc/test_metrics.json

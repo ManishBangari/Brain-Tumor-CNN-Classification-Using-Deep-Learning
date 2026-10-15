@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Brain Tumor MRI Classifier</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 2rem auto; max-width: 760px; color: #1f2937; }
+      .card { border: 1px solid #d1d5db; border-radius: 12px; padding: 1.5rem; background: #f9fafb; }
+      label { display: block; margin-bottom: 0.5rem; }
+      input[type="file"] { margin-bottom: 1rem; }
+      button { background: #2563eb; color: white; border: none; border-radius: 8px; padding: 0.75rem 1.2rem; cursor: pointer; }
+      .error { color: #b91c1c; margin-top: 1rem; }
+      .result { margin-top: 1.5rem; background: white; border: 1px solid #d1d5db; border-radius: 8px; padding: 1rem; }
+      .small { font-size: 0.9rem; color: #4b5563; }
+      ul { padding-left: 1.2rem; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Brain Tumor MRI Classifier</h1>
+      <p class="small">Educational/research demo using a TensorFlow CNN trained on the Kaggle MRI dataset.</p>
+
+      <form method="post" action="/predict" enctype="multipart/form-data">
+        <label for="file">Upload an MRI image</label>
+        <input id="file" name="file" type="file" accept=".jpg,.jpeg,.png,.bmp,.gif" required>
+        <button type="submit">Classify image</button>
+      </form>
+
+      {% if error %}
+        <p class="error">{{ error }}</p>
+      {% endif %}
+
+      {% if result %}
+        <div class="result">
+          <h2>Prediction</h2>
+          <p><strong>Predicted label:</strong> {{ result.predicted_label }}</p>
+          <p><strong>Confidence:</strong> {{ '%.2f' | format(result.confidence * 100) }}%</p>
+          <p><strong>Probabilities:</strong></p>
+          <ul>
+            {% for label, probability in result.probabilities.items() %}
+              <li>{{ label }}: {{ '%.2f' | format(probability * 100) }}%</li>
+            {% endfor %}
+          </ul>
+        </div>
+      {% endif %}
+
+      <p class="small">
+        For educational/research use only. Not intended for medical diagnosis or treatment.
+      </p>
+    </div>
+  </body>
+</html>

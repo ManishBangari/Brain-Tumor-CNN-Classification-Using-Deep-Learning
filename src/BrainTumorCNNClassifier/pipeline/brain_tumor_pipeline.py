@@ -1,15 +1,22 @@
 from __future__ import annotations
 
 import json
+import os
 import random
 from pathlib import Path
 from typing import Any
 
+import mlflow
+import mlflow.keras
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 
 from src.BrainTumorCNNClassifier import logger
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", f"file://{(PROJECT_ROOT / 'mlruns').as_posix()}")
 
 
 def get_class_names(train_dir: str | Path) -> list[str]:
@@ -20,6 +27,43 @@ def get_class_names(train_dir: str | Path) -> list[str]:
     if not class_names:
         raise ValueError(f"No class folders found in training data: {train_path}")
     return class_names
+
+
+def configure_mlflow(tracking_uri: str | None = None):
+    os.environ.setdefault("MLFLOW_ALLOW_FILE_STORE", "true")
+    uri = tracking_uri or MLFLOW_TRACKING_URI
+    mlflow.set_tracking_uri(uri)
+    return uri
+
+
+def save_model_metadata(
+    model_path: str | Path,
+    class_names: list[str],
+    image_size: tuple[int, int],
+    batch_size: int,
+    learning_rate: float,
+    seed: int,
+):
+    model_path = Path(model_path)
+    metadata_path = model_path.with_suffix(".json")
+    metadata = {
+        "class_names": class_names,
+        "image_size": [int(image_size[0]), int(image_size[1])],
+        "batch_size": int(batch_size),
+        "learning_rate": float(learning_rate),
+        "seed": int(seed),
+    }
+    metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    logger.info("Saved model metadata at %s", metadata_path)
+    return metadata_path
+
+
+def load_model_metadata(model_path: str | Path) -> dict[str, Any]:
+    model_path = Path(model_path)
+    metadata_path = model_path.with_suffix(".json")
+    if not metadata_path.exists():
+        raise FileNotFoundError(f"Model metadata not found at {metadata_path}")
+    return json.loads(metadata_path.read_text(encoding="utf-8"))
 
 
 def _decode_and_resize(path: tf.Tensor, image_size: tuple[int, int]) -> tf.Tensor:
@@ -124,7 +168,8 @@ def build_datasets(
 def build_model(num_classes: int, input_shape: tuple[int, int, int] = (224, 224, 3), learning_rate: float = 1e-4):
     model = keras.Sequential(
         [
-            keras.layers.Rescaling(1.0 / 255.0, input_shape=input_shape),
+            keras.Input(shape=input_shape),
+            keras.layers.Rescaling(1.0 / 255.0),
             keras.layers.Conv2D(32, (3, 3), activation="relu"),
             keras.layers.MaxPooling2D((2, 2)),
             keras.layers.Conv2D(64, (3, 3), activation="relu"),
@@ -162,6 +207,39 @@ def save_metrics(metrics: dict[str, Any], out_path: str | Path):
     logger.info("Saved metrics to %s", out)
 
 
+def compute_classification_metrics(model, test_ds, class_names: list[str]):
+    predictions = model.predict(test_ds, verbose=0)
+    y_pred = np.argmax(predictions, axis=1)
+    y_true = []
+    for _, labels in test_ds:
+        y_true.extend(np.argmax(labels.numpy(), axis=1).tolist())
+    y_true = np.asarray(y_true)
+    total = len(class_names)
+    confusion = np.zeros((total, total), dtype=int)
+    for true_i, pred_i in zip(y_true, y_pred):
+        confusion[int(true_i), int(pred_i)] += 1
+
+    per_class = {}
+    for idx, label in enumerate(class_names):
+        tp = confusion[idx, idx]
+        fp = confusion[:, idx].sum() - tp
+        fn = confusion[idx, :].sum() - tp
+        precision = tp / (tp + fp) if (tp + fp) else 0.0
+        recall = tp / (tp + fn) if (tp + fn) else 0.0
+        f1 = 2.0 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+        per_class[label] = {
+            "precision": float(precision),
+            "recall": float(recall),
+            "f1": float(f1),
+            "support": int(confusion[idx, :].sum()),
+        }
+
+    return {
+        "confusion_matrix": confusion.tolist(),
+        "per_class": per_class,
+    }
+
+
 def train_model(
     train_dir: str | Path,
     test_dir: str | Path,
@@ -194,8 +272,13 @@ def train_model(
     )
 
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    configure_mlflow()
 
-    model = build_model(num_classes=len(class_names), input_shape=(image_size[0], image_size[1], 3), learning_rate=learning_rate)
+    model = build_model(
+        num_classes=len(class_names),
+        input_shape=(image_size[0], image_size[1], 3),
+        learning_rate=learning_rate,
+    )
     checkpoint_callback = keras.callbacks.ModelCheckpoint(
         filepath=model_path,
         monitor="val_accuracy",
@@ -205,26 +288,74 @@ def train_model(
     )
 
     logger.info("Starting model training for %s epochs", epochs)
-    history = model.fit(
-        train_ds,
-        validation_data=val_ds,
-        epochs=epochs,
-        callbacks=[checkpoint_callback],
-    )
+    with mlflow.start_run(run_name=f"brain_tumor_cnn_{seed}") as run:
+        mlflow.log_params(
+            {
+                "train_dir": str(train_dir),
+                "test_dir": str(test_dir),
+                "epochs": int(epochs),
+                "batch_size": int(batch_size),
+                "image_size": f"{image_size[0]}x{image_size[1]}",
+                "validation_split": float(validation_split),
+                "learning_rate": float(learning_rate),
+                "seed": int(seed),
+                "num_classes": int(len(class_names)),
+            }
+        )
+        mlflow.log_param("class_names", json.dumps(class_names))
+        history = model.fit(
+            train_ds,
+            validation_data=val_ds,
+            epochs=epochs,
+            callbacks=[checkpoint_callback],
+        )
 
-    metrics = {"train": history.history, "final_val_accuracy": float(history.history["val_accuracy"][-1])}
-    save_metrics(metrics, output_dir_path / "metrics.json")
-    save_class_names(class_names, output_dir_path / "class_names.json")
+        for epoch in range(len(history.history["loss"])):
+            mlflow.log_metric("train_loss", float(history.history["loss"][epoch]), step=epoch)
+            mlflow.log_metric("train_accuracy", float(history.history["accuracy"][epoch]), step=epoch)
+            mlflow.log_metric("val_loss", float(history.history["val_loss"][epoch]), step=epoch)
+            mlflow.log_metric("val_accuracy", float(history.history["val_accuracy"][epoch]), step=epoch)
 
-    best_model = keras.models.load_model(model_path)
-    test_loss, test_accuracy, test_precision, test_recall = best_model.evaluate(test_ds, verbose=0)
-    final_metrics = {
-        "test_loss": float(test_loss),
-        "test_accuracy": float(test_accuracy),
-        "test_precision": float(test_precision),
-        "test_recall": float(test_recall),
-    }
-    save_metrics(final_metrics, output_dir_path / "test_metrics.json")
+        metrics = {
+            "train": history.history,
+            "final_val_accuracy": float(history.history["val_accuracy"][-1]),
+        }
+        save_metrics(metrics, output_dir_path / "metrics.json")
+        save_class_names(class_names, output_dir_path / "class_names.json")
+        save_model_metadata(
+            model_path=model_path,
+            class_names=class_names,
+            image_size=image_size,
+            batch_size=batch_size,
+            learning_rate=learning_rate,
+            seed=seed,
+        )
+
+        best_model = keras.models.load_model(model_path)
+        test_loss, test_accuracy, test_precision, test_recall = best_model.evaluate(test_ds, verbose=0)
+        classification_report = compute_classification_metrics(best_model, test_ds, class_names)
+        final_metrics = {
+            "test_loss": float(test_loss),
+            "test_accuracy": float(test_accuracy),
+            "test_precision": float(test_precision),
+            "test_recall": float(test_recall),
+            "per_class": classification_report["per_class"],
+            "confusion_matrix": classification_report["confusion_matrix"],
+        }
+        save_metrics(final_metrics, output_dir_path / "test_metrics.json")
+        mlflow.log_metric("test_loss", float(test_loss))
+        mlflow.log_metric("test_accuracy", float(test_accuracy))
+        mlflow.log_metric("test_precision", float(test_precision))
+        mlflow.log_metric("test_recall", float(test_recall))
+        for label_name, values in classification_report["per_class"].items():
+            mlflow.log_metric(f"{label_name}_precision", float(values["precision"]))
+            mlflow.log_metric(f"{label_name}_recall", float(values["recall"]))
+            mlflow.log_metric(f"{label_name}_f1", float(values["f1"]))
+        mlflow.log_artifact(str(output_dir_path / "metrics.json"))
+        mlflow.log_artifact(str(output_dir_path / "test_metrics.json"))
+        mlflow.log_artifact(str(output_dir_path / "class_names.json"))
+        mlflow.keras.log_model(best_model, artifact_path="model")
+
     logger.info("Training complete. Best model saved at %s", model_path)
     return model_path, class_names
 
